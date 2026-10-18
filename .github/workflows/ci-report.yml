@@ -1,0 +1,46 @@
+# 临时排障用：作业日志匿名 API 拿不到（403），匿名限额又只有 60/小时，
+# 所以把完整构建日志压回一个 ci-logs 分支 —— 本地用 SSH fetch 读，不受限额影响。
+# 提交信息里必须逐字出现 ci-report，否则 job 静默 skipped（踩过）。定位完删掉这个文件和分支。
+name: ci-report
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: ci-report
+  cancel-in-progress: true
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'ci-report')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+      - name: 构建（输出留成文件）
+        continue-on-error: true
+        run: |
+          set +e
+          gradle -p android assembleRelease --no-daemon --console=plain -Pshibo.version=1.0.1 > build.log 2>&1
+          echo "gradle-exit=$?" >> build.log
+      - name: 完整日志压回 ci-logs 分支
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          rm -rf ../cilog && mkdir -p ../cilog && cd ../cilog
+          git init -q
+          git config user.name "ci-report"
+          git config user.email "ci-report@users.noreply.github.com"
+          cp "$GITHUB_WORKSPACE/build.log" "android-${GITHUB_SHA:0:7}.log"
+          git add -A
+          git commit -qm "ci log ${GITHUB_SHA:0:7}"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/$GITHUB_REPOSITORY.git" \
+            HEAD:refs/heads/ci-logs
