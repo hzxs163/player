@@ -1,0 +1,126 @@
+name: build-android-app
+
+# 触发只认 app-v* 标签（和手动触发）。
+# 注意：on.push 里同时写 branches 和 tags 会把标签推送静默过滤掉（实测踩过），
+# 所以这里 push 不加任何过滤，改在 job 级 if 上收窄——别的分支 push 会进来但立刻被跳过。
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 x.y.z，例如 1.0.1'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    if: startsWith(github.ref, 'refs/tags/app-v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 定版本号
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            v="${{ inputs.version }}"
+          else
+            v="${GITHUB_REF#refs/tags/app-v}"
+          fi
+          if ! printf '%s' "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "版本号必须三段 x.y.z（拿到的是：$v）" >&2
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "要构建的版本：$v"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # 站点清单不在这个 workflow 里重写一遍：sync-www.mjs 直接读 deploy-pages.yml 的 cp 行，
+      # 保证「APK 里的页面」和「Pages 发出去的页面」是同一份文件列表
+      - name: 把站点文件打进 assets
+        run: node scripts/sync-www.mjs
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: 构建 release APK
+        run: gradle -p android assembleRelease --no-daemon -Pshibo.version=${{ steps.ver.outputs.version }}
+
+      - name: 导出签名证书 DER
+        run: |
+          set -euo pipefail
+          keytool -list -rfc -keystore android/keystore/shibo.p12 -storetype PKCS12 \
+            -storepass shibo-android -alias shibo 2>/dev/null \
+            | sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' > cert.pem
+          test -s cert.pem
+          openssl x509 -in cert.pem -noout -subject -dates -fingerprint -sha256
+          openssl x509 -in cert.pem -outform der -out cert.der
+
+      # 这一步是真门禁：页面字节对不上清单、类没进 dex、签名不是仓库那把钥匙，都不发版
+      - name: 校验 APK
+        run: |
+          set -euo pipefail
+          cp android/app/build/outputs/apk/release/app-release.apk "ShiBo-v${{ steps.ver.outputs.version }}-signed.apk"
+          node scripts/verify-apk.mjs "ShiBo-v${{ steps.ver.outputs.version }}-signed.apk" --cert cert.der
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ShiBo-v${{ steps.ver.outputs.version }}
+          path: ShiBo-v*-signed.apk
+          if-no-files-found: error
+
+      - name: 发布 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          v="${{ steps.ver.outputs.version }}"
+          tag="app-v${v}"
+          asset="ShiBo-v${v}-signed.apk"
+          sha=$(sha256sum "$asset" | cut -c1-64)
+          size=$(stat -c %s "$asset")
+          node -e 'const m=require("./android/app/src/main/assets/www-manifest.json");
+            console.log(m.files.map((f) => "- " + f.path + " · " + f.bytes + " B · " + f.sha256.slice(0, 12) + "…").join("\n"))' > files.md
+          cat > notes.md <<EOF
+          网页版「拾波」的原样套壳（页面就是 https://hzxs163.github.io/player/ 那一份，构建时打进 APK），数据走 GitHub Pages 上的每日快照。
+
+          - 首次运行联网下载当天电台快照（压缩约 2.1 MB / 解压 7.7 MB），存进应用私有目录
+          - 之后每次开屏先用本机那份秒开，后台无感换成线上最新的一版；本次收听不受打断
+          - 断网也开得了机：用上次存的快照，顶栏会写明「本机快照（离线）」
+          - 锁屏、切后台继续出声；通知栏有 上一台 / 暂停 / 下一台
+          - 只加载包内页面，外部链接一律交给系统浏览器；不收集数据，唯一的网络上报是 radio-browser 的公开点击计数
+
+          安装：下载下面的 apk，在手机上打开并允许「安装未知来源应用」。以后覆盖安装即可（同一把签名钥匙，历史/收藏/本机快照都留着）。
+
+          文件：$asset · $size 字节
+          SHA-256：$sha
+
+          包内页面（与仓库文件逐字节一致，构建时已校验）：
+
+          $(cat files.md)
+          EOF
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$asset" --clobber
+            gh release edit "$tag" --title "拾波安卓 v${v}" --notes-file notes.md
+          else
+            gh release create "$tag" "$asset" --title "拾波安卓 v${v}" --notes-file notes.md
+          fi
+          # gh 的 JSON 键是 url（htmlUrl 是 REST 的键），别写错否则这步会红
+          gh release view "$tag" --json url -q '.url'

@@ -1,12 +1,17 @@
 // 装配层：把数据、筛选、列表、播放、历史接在一起。
 // 逻辑都在各模块里，这里只做 DOM 绑定与状态流转。
 import {
-  COL, inflate, parseDataset, decodeIds, flagEmoji, applyFilter, isSecureUrl,
+  COL, inflate, parseDatasetText, decodeIdsText, flagEmoji, applyFilter, isSecureUrl,
   isHlsUrl, upgradeToHttps, hlsMode, clipUrl,
   stationTags, stationCountry, stationCc, stationLang, codecBitrate, codecName,
   countryStats, pickWeighted, rememberRecent, makeRng,
   guessUserCc, sortCountriesByPosition, haversineKm, dialNeighbors, localMeanTime,
 } from './core.js';
+import {
+  storeOf, newestCached, writeCache, recordMatches, versionOf, rowsMatch,
+  sha256Hex, shaMatches, WEB_SNAPSHOT, IDS_SNAPSHOT,
+} from './cache.js';
+import { createShell } from './native-bridge.js';
 import { ccName } from './countries-cn.js';
 import { langName } from './langs-cn.js';
 import { createStationList } from './listview.js';
@@ -66,6 +71,14 @@ const els = {
 // 手机断点：CSS 里也用同一个数，改一处就要改两处，所以 JS 只认这一条查询
 const NARROW = matchMedia('(max-width: 760px)');
 
+// 安卓套壳：通知栏的播控键直接点在现有按钮上——它们已经含了「暂停/继续/换台/翻历史」的全部判断，
+// 复制一份逻辑迟早和页面上的按钮分叉。浏览器里 shell.native 为 false，下面是零成本的路过。
+const shell = createShell(window, {
+  toggle: () => els.btnPlay.click(),
+  next: () => els.btnNext.click(),
+  prev: () => els.btnPrev.click(),
+});
+
 const state = {
   ds: null, ids: null, uuidToIdx: null, idsPromise: null,
   stats: null,
@@ -78,6 +91,7 @@ const state = {
   startTimer: 0, stallTimer: 0, reportedFor: '',
   sleepUntil: 0, sleepTick: 0,
   userCc: '', ccSort: 'pos', ccNote: '', sig: '', navFromIdx: -1,
+  cache: null, snapVersion: '', dataFrom: '',
 };
 
 let list = null;
@@ -114,8 +128,8 @@ function setOverlay(show, title, body, pct) {
 
 // ---------- 下载 ----------
 
-async function getBytes(url, expectBytes, onProgress) {
-  const res = await fetch(url);
+async function getBytes(url, expectBytes, onProgress, opts) {
+  const res = await fetch(url, opts || {});
   if (!res.ok) throw new Error(`HTTP ${res.status} · ${url}`);
   const total = Number(res.headers.get('content-length')) || expectBytes || 0;
   if (!res.body || !res.body.getReader) {
@@ -149,17 +163,47 @@ async function probeSource(base) {
   }
 }
 
+// 814 字节的 meta 单独留在 localStorage：断网时它是唯一还能认出「磁盘那份是哪一版」的东西，
+// 没有它，本机缓存就没法判断新旧，开屏只能白屏
+const META_KEY = 'shibo.meta.v1';
+
 async function chooseSource(preferredId) {
   const first = SOURCES.find((s) => s.id === preferredId);
   const order = first ? [first, ...SOURCES.filter((s) => s !== first)] : SOURCES;
   for (const s of order) {
     const meta = await probeSource(s.base);
-    if (meta && Number(meta.web_rows) > 0) return { source: s, meta };
+    if (meta && Number(meta.web_rows) > 0) {
+      try {
+        localStorage.setItem(META_KEY, JSON.stringify({ id: s.id, meta }));
+      } catch { /* 存不下也照样能用，只是下次断网认不出版本 */ }
+      return { source: s, meta, online: true };
+    }
   }
+  try {
+    const saved = JSON.parse(localStorage.getItem(META_KEY) || 'null');
+    const s = saved && SOURCES.find((x) => x.id === saved.id);
+    if (s && saved.meta && Number(saved.meta.web_rows) > 0) return { source: s, meta: saved.meta, online: false };
+  } catch { /* 手动改坏过的 localStorage 不该拦住开机 */ }
   throw new Error('所有数据源都读不到 meta_web.json');
 }
 
 // ---------- 载入 ----------
+
+// 本地那份能不能直接用：版本凭据要对得上，行数还要等于 meta 报的 web_rows（挡半截文件）。
+// 返回 null 表示「没有可用的本地数据」，调用方照常下载。
+async function readLocalSnapshot(store, meta) {
+  if (!store) return null;
+  const hit = await newestCached(store, WEB_SNAPSHOT);
+  if (!hit) return null;
+  let ds = null;
+  try {
+    ds = parseDatasetText(hit.text);
+  } catch {
+    return null; // 解不出就直接重下，别把坏文件当缓存留着
+  }
+  if (!rowsMatch(ds.rows, meta, WEB_SNAPSHOT)) return null;
+  return { ds, version: versionOf(hit.record, ''), fresh: recordMatches(hit.record, meta, WEB_SNAPSHOT) };
+}
 
 async function boot() {
   setDs('loading', '探测数据源…');
@@ -179,20 +223,42 @@ async function boot() {
     return;
   }
   markSource(picked.source);
-  state.sig = picked.meta.generated_at || picked.meta.sha256_gz || '';
+  const meta = picked.meta;
+  state.sig = meta.generated_at || meta.sha256_gz || '';
   restoreSession(state.sig);
+  state.cache = storeOf(window);
 
-  // 快照走 Pages/CDN，前端数据集三件产物按顺序下
-  const webBytes = await getBytes(picked.source.base + 'stations.web.json.gz', picked.meta.gz_bytes,
-    (p) => setOverlay(true, null, `下载快照 ${Math.round(p * 100)}%`, p * 0.85));
-  setDs('loading', `解压 ${(webBytes.length / 1048576).toFixed(2)} MB…`);
-  const ds = parseDataset(await inflate(webBytes));
+  // 本地优先：宿主存过快照就先读磁盘（断网也开得了机），旧了再后台悄悄换成当天最新的一份
+  const local = await readLocalSnapshot(state.cache, meta);
+  let ds;
+  if (local) {
+    ds = local.ds;
+    state.snapVersion = local.version || state.sig;
+    state.dataFrom = local.fresh ? 'local' : 'local-stale';
+  } else {
+    const webBytes = await getBytes(picked.source.base + WEB_SNAPSHOT.file, meta[WEB_SNAPSHOT.bytesKey],
+      (p) => setOverlay(true, null, `下载快照 ${Math.round(p * 100)}%`, p * 0.85), { cache: 'no-store' });
+    const sum = await sha256Hex(webBytes);
+    if (!shaMatches(meta[WEB_SNAPSHOT.shaKey], sum)) {
+      throw new Error(`快照校验不过：${sum || '算不出哈希'} ≠ ${meta[WEB_SNAPSHOT.shaKey] || '线上没给'}`);
+    }
+    setDs('loading', `解压 ${(webBytes.length / 1048576).toFixed(2)} MB…`);
+    const text = new TextDecoder().decode(await inflate(webBytes));
+    ds = parseDatasetText(text);
+    if (!rowsMatch(ds.rows, meta, WEB_SNAPSHOT)) throw new Error(`快照行数 ${ds.rows.length} 与 meta 的 ${meta.web_rows} 不符`);
+    state.snapVersion = state.sig;
+    state.dataFrom = 'net';
+    if (state.cache) {
+      const ok = await writeCache(state.cache, meta, text, WEB_SNAPSHOT);
+      if (!ok) toast('本机快照没能存住（空间不足？），下次开屏还要重下', 5000, true);
+    }
+  }
   state.ds = ds;
   state.stats = countryStats(ds);
 
-  state.idsPromise = loadIds(picked.source, picked.meta);
+  state.idsPromise = loadIds(picked.source, meta);
 
-  setDs('ok', `${fmt(ds.rows.length)} 台可播 · ${picked.source.label}`);
+  setDs(picked.online ? 'ok' : 'bad', `${fmt(ds.rows.length)} 台可播 · ${dataNote(picked)}`);
   setOverlay(false);
   if (NARROW.matches) els.npMore.open = false;
   buildFacets();
@@ -202,6 +268,31 @@ async function boot() {
   renderDial();
   renderLists();
   setStatus(`就绪 · 按 N 随机一台（上报镜像 ${MIRROR}）`, 'ok');
+  // 本地那份不是最新版：先把界面交出去，再在后台下新的存盘（本次会话不重新解析，不打断收听）
+  if (local && !local.fresh && picked.online) refreshSnapshot(picked.source, meta);
+}
+
+// 「本地快照 · 后台更新中」这种话必须让用户看懂自己在听哪一版
+function dataNote(picked) {
+  if (state.dataFrom === 'net') return picked.source.label;
+  const stale = state.dataFrom === 'local-stale';
+  return `${picked.online ? '本机快照' : '本机快照（离线）'}${stale ? ' · 后台更新中' : ' · 已是最新'}`;
+}
+
+// 后台换新：只写盘，不重新解析当前会话的数据集
+async function refreshSnapshot(source, meta) {
+  try {
+    const bytes = await getBytes(source.base + WEB_SNAPSHOT.file, meta[WEB_SNAPSHOT.bytesKey], null,
+      { cache: 'no-store' });
+    const sum = await sha256Hex(bytes);
+    if (!shaMatches(meta[WEB_SNAPSHOT.shaKey], sum)) throw new Error('校验不过');
+    const text = new TextDecoder().decode(await inflate(bytes));
+    if (!rowsMatch(parseDatasetText(text).rows, meta, WEB_SNAPSHOT)) throw new Error('行数对不上');
+    if (!(await writeCache(state.cache, meta, text, WEB_SNAPSHOT))) throw new Error('本机写入失败');
+    setStatus(`本机快照已更新到 ${fmt(Number(meta.web_rows))} 台那一版 · 下次开屏直接用`, 'ok');
+  } catch (e) {
+    setStatus(`后台更新快照失败：${e.message}`, 'bad');
+  }
 }
 
 // 「默认选中中国」值不值一次推断？值，但要写清楚依据、并且用户可以一键改。
@@ -241,12 +332,35 @@ function markSource(source) {
   els.sourceSelect.value = source.id;
 }
 
+// ids 决定播放和上报指向哪一台，所以只认同版的那一份：版本对不上宁可重新下载，
+// 也绝不拿另一版的下标去点这一版的台（错了不会报错，只是悄悄播错台、上报错台）
 async function loadIds(source, meta) {
   try {
-    const bytes = await getBytes(source.base + 'stations.ids.json.gz', meta.ids_gz_bytes,
-      (p) => { if (state.playState === 'idle') setStatus(`后台载入电台 id ${Math.round(p * 100)}%`); });
-    const ids = decodeIds(await inflate(bytes));
-    if (ids.length !== state.ds.rows.length) throw new Error(`id 数 ${ids.length} 与行数 ${state.ds.rows.length} 不一致`);
+    const wantVersion = state.snapVersion || state.sig || '';
+    const anchor = { ids_rows: state.ds ? state.ds.rows.length : 0 };
+    let ids = null;
+    if (state.cache && wantVersion) {
+      const hit = await newestCached(state.cache, IDS_SNAPSHOT, wantVersion);
+      if (hit && versionOf(hit.record, '') === wantVersion) {
+        const v = decodeIdsText(hit.text);
+        if (rowsMatch(v, anchor, IDS_SNAPSHOT)) ids = v;
+      }
+    }
+    if (!ids) {
+      if (wantVersion && state.sig && wantVersion !== state.sig) {
+        throw new Error(`本机用的是 ${wantVersion} 那一版数据，线上 id 表是另一版，不能混用`);
+      }
+      const bytes = await getBytes(source.base + IDS_SNAPSHOT.file, meta[IDS_SNAPSHOT.bytesKey],
+        (p) => { if (state.playState === 'idle') setStatus(`后台载入电台 id ${Math.round(p * 100)}%`); }, { cache: 'no-store' });
+      const sum = await sha256Hex(bytes);
+      if (!shaMatches(meta[IDS_SNAPSHOT.shaKey], sum)) throw new Error('id 表校验不过');
+      const text = new TextDecoder().decode(await inflate(bytes));
+      ids = decodeIdsText(text);
+      if (!rowsMatch(ids, anchor, IDS_SNAPSHOT)) throw new Error(`id 数 ${ids.length} 与行数 ${anchor.ids_rows} 不一致`);
+      if (state.cache && !(await writeCache(state.cache, meta, text, IDS_SNAPSHOT))) {
+        setStatus('id 表没能存进本机，下次开屏还要重下', 'bad');
+      }
+    }
     // 对齐只校验长度是弱的：两个文件来自同一次构建，但万一错位，播放和上报就会指到另一台台上。
     // 官方 uuid 是 40 位十六进制，形状不对的数量非零就是明确的报警，写在状态条里而不是吞掉
     let odd = 0;
@@ -545,7 +659,15 @@ function goState(next) {
   })[next] || next;
   els.btnPlay.textContent = next === 'playing' ? '❚❚' : '▶';
   els.btnPlay.classList.toggle('is-playing', next === 'playing');
+  syncShell(next);
   return true;
+}
+
+// 中间态（连接中/缓冲中）不给宿主发消息：每次换台都把前台通知撤了再建，通知栏会闪
+function syncShell(kind) {
+  if (!shell.native || kind === 'loading' || kind === 'stalled') return;
+  const row = state.nowIdx >= 0 && state.ds ? state.ds.rows[state.nowIdx] : null;
+  shell.send(kind === 'playing', row ? shortName(row[COL.name]) : '', row ? codecBitrate(state.ds, row) : '');
 }
 
 async function play(idx, { chain } = {}) {

@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">拾波</string>
+    <string name="notif_channel">播放</string>
+    <string name="notif_title">拾波 · 正在收听</string>
+    <string name="act_prev">上一台</string>
+    <string name="act_pause">暂停</string>
+    <string name="act_next">下一台</string>
+</resources>

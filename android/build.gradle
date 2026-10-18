@@ -1,0 +1,5 @@
+// 仓库里不放 gradle wrapper jar（几 MB 二进制换不来任何可复现性）：
+// CI 用 gradle/actions/setup-gradle 直接提供 gradle 8.11.1，本地想跑就自己装一份 gradle。
+plugins {
+    id 'com.android.application' version '8.7.3' apply false
+}

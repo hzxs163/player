@@ -1,0 +1,11 @@
+<resources>
+    <!-- 不用 androidx/Material 库：这套壳只装一个 WebView，框架的 Material 主题够用，
+         少一个依赖就少一次 CI 上的版本对撞 -->
+    <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ink</item>
+        <item name="android:statusBarColor">@color/ink</item>
+        <item name="android:navigationBarColor">@color/ink</item>
+        <item name="android:colorAccent">@color/teal</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

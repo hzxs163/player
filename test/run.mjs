@@ -261,6 +261,111 @@ eq('西经 105 度给前一日 21:00', C.localMeanTime(-105, noonUtc), '21:00');
 eq('经度 0 是缺省哨兵，不显示', C.localMeanTime(0, noonUtc), '');
 eq('缺经度不显示', C.localMeanTime(undefined, noonUtc), '');
 
+// ---------- 本地快照缓存（假宿主存储走完整读写流程，不依赖安卓） ----------
+import * as K from '../src/cache.js';
+
+const meta = JSON.parse(fs.readFileSync(path.join(dataDir, 'meta_web.json'), 'utf8'));
+const idsText = zlib.gunzipSync(idsGz).toString('utf8');
+
+// 假 bridge：和安卓那边注入的 window.ShiBoStore 同形状（同步返回字符串、list 返回 JSON 数组）
+function fakeBridge() {
+  const m = new Map();
+  return {
+    map: m,
+    read: (n) => (m.has(n) ? m.get(n) : null),
+    write: (n, t) => { m.set(n, t); return true; },
+    remove: (n) => m.delete(n),
+    list: () => JSON.stringify([...m.keys()]),
+  };
+}
+
+eq('名字白名单挡住路径穿越', [K.isSafeName('shibo.snap.2026-10-18_04_02_13.313_'), K.isSafeName('../../etc/passwd'), K.isSafeName('A'), K.isSafeName(''), K.isSafeName('a'.repeat(200))],
+  [true, false, false, false, false]);
+eq('生成的 key 必落在白名单内，且字典序等于时间序（ISO 的 T/Z/冒号都换掉）',
+  [K.keyFor(K.WEB_SNAPSHOT, '2026-10-18T04:02:13.313Z'), K.keyFor(K.WEB_SNAPSHOT, '2026-10-19T00:00:00.000Z'), K.isSafeName(K.keyFor(K.WEB_SNAPSHOT, meta.generated_at))],
+  ['shibo.snap.2026-10-18_04_02_13.313_', 'shibo.snap.2026-10-19_00_00_00.000_', true]);
+eq('snapKey 没版本凭据时不给 key', [K.snapKey(meta) === K.keyFor(K.WEB_SNAPSHOT, meta.generated_at), K.snapKey({})], [true, null]);
+
+const cstore = K.bridgeStore(fakeBridge());
+const wrote = await K.writeCache(cstore, meta, text, K.WEB_SNAPSHOT);
+eq('写入真快照返回成功', wrote, true);
+const back = await K.newestCached(cstore, K.WEB_SNAPSHOT);
+eq('读回来的文本长度与写入一致', back.text.length, text.length);
+eq('记录里的版本与 meta 相符', K.recordMatches(back.record, meta, K.WEB_SNAPSHOT), true);
+eq('版本换了就不算命中', K.recordMatches(back.record, { ...meta, generated_at: '2027-01-01T00:00:00.000Z' }, K.WEB_SNAPSHOT), false);
+eq('读回来的快照重新解析仍是 62022 行', C.parseDatasetText(back.text).rows.length, 62022);
+eq('行数对齐按 meta 判', [K.rowsMatch(new Array(62022), meta, K.WEB_SNAPSHOT), K.rowsMatch(new Array(10), meta, K.WEB_SNAPSHOT)], [true, false]);
+
+// 半截文件必须被拒收，并且顺手把它从磁盘上清掉
+const half = await (async () => {
+  await cstore.write('shibo.snap.2030-01-01_00_00_00_000_', text.slice(0, 100000));
+  await cstore.write('shibo.snap.2030-01-01_00_00_00_000_.rec', K.recordOf({ generated_at: '2030-01-01T00:00:00.000Z', gz_bytes: 1, web_rows: 1 }, K.WEB_SNAPSHOT));
+  const hit = await K.newestCached(cstore, K.WEB_SNAPSHOT);
+  return [hit.key, await cstore.read('shibo.snap.2030-01-01_00_00_00_000_')];
+})();
+eq('半截快照被 newestCached 跳过并删掉', [half[0] === K.snapKey(meta), half[1]], [true, null]);
+
+eq('ids 缓存走自己的前缀', K.snapKey(meta, K.IDS_SNAPSHOT), 'shibo.ids.2026-10-18_04_02_13.313_');
+await K.writeCache(cstore, meta, idsText, K.IDS_SNAPSHOT);
+const idsHit = await K.newestCached(cstore, K.IDS_SNAPSHOT, K.versionOf(back.record, ''));
+eq('ids 精确命中同版那份', [idsHit.key === K.snapKey(meta, K.IDS_SNAPSHOT), JSON.parse(idsHit.text).length], [true, 62022]);
+eq('ids 要的 version 只存了新版时退回最新', (await K.newestCached(cstore, K.IDS_SNAPSHOT, '2020-01-01T00:00:00.000Z')).key, idsHit.key);
+
+// 旧版本清理：一份 7.6MB，留 2 份（断网时还有旧的可开），第三版进来才把最老的整份删掉
+const names = ['shibo.snap.a', 'shibo.snap.b', 'shibo.snap.c'];
+eq('pruneNames 留最新的一份加当前这份', K.pruneNames([...names].reverse(), 'shibo.snap.c', 2, { prefix: 'shibo.snap.' }), ['shibo.snap.a']);
+
+const snapOnly = (l) => l.filter((n) => n.startsWith('shibo.snap.') && !n.endsWith('.rec')).sort();
+await K.writeCache(cstore, { ...meta, generated_at: '2026-10-20T04:02:13.313Z' }, text, K.WEB_SNAPSHOT);
+eq('写第二版时第一版还留着（keep=2，断网还有旧版可开）', snapOnly(await cstore.list()),
+  ['shibo.snap.2026-10-18_04_02_13.313_', 'shibo.snap.2026-10-20_04_02_13.313_']);
+await K.writeCache(cstore, { ...meta, generated_at: '2026-10-22T04:02:13.313Z' }, text, K.WEB_SNAPSHOT);
+eq('写第三版才把最老的清掉', snapOnly(await cstore.list()),
+  ['shibo.snap.2026-10-20_04_02_13.313_', 'shibo.snap.2026-10-22_04_02_13.313_']);
+eq('删整份不留孤儿 .rec', (await cstore.list()).some((n) => n.startsWith('shibo.snap.2026-10-18')), false);
+
+const br = fakeBridge();
+br.read = () => { throw new Error('宿主崩了'); };
+br.write = () => { throw new Error('宿主崩了'); };
+const robust = K.bridgeStore(br);
+eq('宿主方法抛错时读返回 null 而不是让页面起不来', await robust.read('shibo.snap.x'), null);
+eq('宿主抛错时写返回 false', await robust.write('shibo.snap.x', 'y'), false);
+const silent = fakeBridge();
+silent.write = () => undefined;
+eq('宿主没回话也不当作写进去了', await K.bridgeStore(silent).write('shibo.snap.x', 'y'), false);
+eq('没有 bridge 时 storeOf 给 null（浏览器路径）', [K.storeOf({}), K.storeOf({ ShiBoStore: { read: 1 } }), K.storeOf({ ShiBoStore: br }).constructor.name],
+  [null, null, 'Object']);
+
+// ---------- 安卓套壳的媒体桥（假 window；浏览器那条路径必须全程哑火） ----------
+import { createShell } from '../src/native-bridge.js';
+
+const winPlain = {};
+const shellOff = createShell(winPlain, { toggle: () => eq('没宿主时不该有动作', 1, 0) });
+eq('没有 ShiBoMedia 时 native 为 false', shellOff.native, false);
+eq('没宿主就不挂 ShiBoNative（页面上没人能戳它）', winPlain.ShiBoNative === undefined, true);
+shellOff.send(true, '随便', 'MP3');
+eq('宿主缺席时 send() 是安全的空操作', true, true);
+
+const mediaSeen = [];
+const transportHits = [];
+const winShell = { ShiBoMedia: { setPlaying: (p, t, u) => mediaSeen.push([p, t, u]) } };
+const shellOn = createShell(winShell, {
+  toggle: () => transportHits.push('toggle'),
+  next: () => transportHits.push('next'),
+  prev: () => { throw new Error('这台炸了'); },
+});
+eq('接上宿主后 native 为 true 并挂上 ShiBoNative', [shellOn.native, typeof winShell.ShiBoNative.onTransport], [true, 'function']);
+shellOn.send(true, '拾波 FM', 'MP3 128k');
+shellOn.send(false);
+eq('播放状态逐条报给宿主，缺的参数补成空串', mediaSeen, [[true, '拾波 FM', 'MP3 128k'], [false, '', '']]);
+eq('通知栏的键落到页面动作上', [winShell.ShiBoNative.onTransport('toggle'), winShell.ShiBoNative.onTransport('next'), transportHits],
+  [true, true, ['toggle', 'next']]);
+eq('没登记的动作返回 false', winShell.ShiBoNative.onTransport('stop'), false);
+eq('动作里抛错时如实回 false，不让宿主以为点成了', winShell.ShiBoNative.onTransport('prev'), false);
+const winCrash = { ShiBoMedia: { setPlaying: () => { throw new Error('宿主崩了'); } } };
+createShell(winCrash, {}).send(true, 'a', 'b');
+eq('宿主 setPlaying 抛错不冒泡回页面', true, true);
+
 // ---------- gzip 兜底提示 ----------
 const roundTrip = await C.inflate(gz);
 eq('inflate 往返等于原文件', new TextDecoder().decode(roundTrip).length, text.length);

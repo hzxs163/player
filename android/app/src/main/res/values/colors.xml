@@ -1,0 +1,6 @@
+<resources>
+    <!-- 与 styles.css 的 :root 变量同值：壳的颜色只跟页面走，不自己发明 -->
+    <color name="ink">#0a0f14</color>
+    <color name="teal">#58c7bd</color>
+    <color name="amber">#f0a831</color>
+</resources>

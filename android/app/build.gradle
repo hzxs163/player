@@ -1,0 +1,58 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 版本号从 -Pshibo.version=1.2.3 传进来（发版 workflow 从 app-v1.2.3 标签里剥出来）。
+// versionCode 用「主*10000 + 次*100 + 修订」，够用到 99.99.99，且每次发版严格递增，
+// 覆盖安装只认这个数字。
+def vName = providers.gradleProperty('shibo.version').getOrElse('0.0.0')
+def nums = vName.split(/[^0-9]+/).findAll { it }.collect { it as int }
+while (nums.size() < 3) nums << 0
+def vCode = nums[0] * 10000 + nums[1] * 100 + nums[2]
+
+android {
+    namespace 'com.shibo.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.shibo.app'
+        // 24 = Android 7.0：这套壳只用了框架 API，没有 androidx，往下够不着是 WebView 本身太旧
+        minSdk 24
+        targetSdk 35
+        versionCode vCode
+        versionName vName
+    }
+
+    signingConfigs {
+        // 仓库内置固定密钥（不是 runner 每次随机生成的 debug 密钥）：
+        // 换了签名用户装第二版就会 INSTALL_FAILED_UPDATE_INCOMPLETE，等于每次都要先卸载丢数据。
+        // 这是本 app 专用的一把钥匙，不用于任何其他发布物。
+        release {
+            storeFile file('../keystore/shibo.p12')
+            storePassword 'shibo-android'
+            storeType 'PKCS12'
+            keyAlias 'shibo'
+            keyPassword 'shibo-android'
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+            shrinkResources false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        // 本机没有 SDK/lint，攒不齐的报错只能靠 CI 猜；一次构建约 5 分钟，
+        // 先只关 release 的强制 lint（写代码时按 API 级别自己守），别让它吃掉发版
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}

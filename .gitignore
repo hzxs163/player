@@ -1,2 +1,10 @@
 /data/
 node_modules/
+
+# 安卓：构建产物，以及构建时由 scripts/sync-www.mjs 从站点复制出来的资产（不入库，避免两份页面漂移）
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/assets/www/
+android/app/src/main/assets/www-manifest.json
+*.log

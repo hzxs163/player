@@ -1,0 +1,12 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+// 工程零第三方依赖（只用框架 API），所以这里不声明 dependencyResolutionManagement：
+// AGP 及其传递依赖走 pluginManagement 的仓库就够了，少写一段就少一种在 CI 上翻车的姿势。
+rootProject.name = 'shibo'
+include ':app'

@@ -48,7 +48,11 @@ export function hlsMode(audio) {
 
 // 文件结构：第 1 行是 {fields, dict}，其后每行一条电台（值按 fields 下标的数组）
 export function parseDataset(u8) {
-  const text = new TextDecoder().decode(u8);
+  return parseDatasetText(new TextDecoder().decode(u8));
+}
+
+// 缓存命中时手上已经是解码好的文本了，别为了复用同一个解析器再编一遍 7.6MB 的字节
+export function parseDatasetText(text) {
   const nl = text.indexOf('\n');
   if (nl < 0) throw new Error('数据集格式不对：没有表头行');
   const header = JSON.parse(text.slice(0, nl));
@@ -78,7 +82,13 @@ export function parseDataset(u8) {
 }
 
 export function decodeIds(u8) {
-  return JSON.parse(new TextDecoder().decode(u8));
+  return decodeIdsText(new TextDecoder().decode(u8));
+}
+
+export function decodeIdsText(text) {
+  const v = JSON.parse(text);
+  if (!Array.isArray(v)) throw new Error('id 表格式不对：不是数组');
+  return v;
 }
 
 export function tagNames(dict) {
