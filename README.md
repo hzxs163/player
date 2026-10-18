@@ -54,6 +54,7 @@ vendor/               hls.js light 构建（MIT，许可证同目录）
 android/              安卓套壳工程（见文末「安卓壳」）
 scripts/sync-www.mjs  把 Pages 那份站点原样打进 APK 的 assets/www
 scripts/verify-apk.mjs 校验 APK：页面字节、dex 里的类、签名证书
+scripts/verify-live.mjs 校验 Pages 上真实响应回来的字节 == 清单（和上一条串起来就是「壳里 == 线上」）
 ```
 
 ## 几个踩过就知道的坑
@@ -82,4 +83,6 @@ Pages 站点本身要先用 REST 建成 workflow 构建方式（`POST /repos/hzx
 
 发版：打标签 `app-v1.0.0` 推上去，`.github/workflows/build-app.yml` 会构建 release APK、校验（页面字节 = 构建清单 = 仓库文件；类在 dex 里；签名证书就是仓库那张），再把它作为 GitHub Release 资产发布。也可以手动触发 workflow 填版本号重出。
 
-本机构建不了（没有 JDK/Android SDK），Gradle 与 Java 的编译正确性以 CI 首次运行为准。
+本机没有 JDK/Android SDK，编译只能在 CI 上跑，所以 Gradle 侧的配置改动都得以 CI 结果为准。踩过的一个：`android/settings.gradle` 里不能省掉 `dependencyResolutionManagement` —— app 模块确实零第三方依赖，但 `aapt2` 这类构建工具是 AGP 声明的**外部构件**，走项目级仓库，`pluginManagement` 的仓库管不到它。
+
+三段校验连起来才是「壳里那份页面就是线上那份」：`sync-www.mjs`（清单从 deploy-pages.yml 的 cp 行推导）→ `verify-apk.mjs`（APK 内 `assets/www` 逐字节对清单）→ `verify-live.mjs`（Pages 真实响应的字节对清单）。
