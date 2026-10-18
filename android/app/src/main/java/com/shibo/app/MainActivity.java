@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.ViewGroup;
@@ -50,6 +51,7 @@ public final class MainActivity extends Activity {
 
         w.setWebViewClient(new ShellClient(this));
         w.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
+        fitSystemBars(w);
         w.addJavascriptInterface(new StoreBridge(this), "ShiBoStore");
         w.addJavascriptInterface(new MediaBridge(this), "ShiBoMedia");
 
@@ -73,6 +75,29 @@ public final class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+    }
+
+    /**
+     * 状态栏不再压着页面：targetSdk 35 起安卓强制铺满整屏（edge-to-edge），
+     * 顶栏会直接钻到时钟和信号图标底下（真机截图实测就是这样）。
+     *
+     * 这里把系统栏尺寸吃成 WebView 的内边距，让出来的那条带子露出 windowBackground
+     * （@color/ink，和页面底色同值），而不是让页面去猜状态栏多高。
+     * 30 以下不动：那边还是框架自己留白，我们再叠一层就成了双重间距。
+     * 不用 getInsets(Type.systemBars()) 那套新 API，是为了少引一个 android.window 类型，
+     * 兼容路径上 getSystemWindowInsets() 各版本都给得出同样的矩形（javac 只会警告已废弃）。
+     */
+    private void fitSystemBars(WebView w) {
+        if (Build.VERSION.SDK_INT < 30) return;
+        getWindow().setDecorFitsSystemWindows(false);
+        w.setOnApplyWindowInsetsListener(new android.view.View.OnApplyWindowInsetsListener() {
+            @Override
+            public android.view.WindowInsets onApplyWindowInsets(android.view.View view, android.view.WindowInsets insets) {
+                Rect r = insets.getSystemWindowInsets();
+                view.setPadding(r.left, r.top, r.right, r.bottom);
+                return insets;
+            }
+        });
     }
 
     @Override
