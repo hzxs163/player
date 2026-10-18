@@ -515,6 +515,21 @@ button.more { flex: none; width: 36px; padding: 8px 0; text-align: center; }
   .drawer .drawer-head button { min-height: 40px; padding: 0 14px; }
   .scrim { display: none; }
 
+  /* 抽屉原本是给 376px 侧栏排的字（10~12px），铺满整屏后这些说明性小字偏小，
+     和列表行、开关一起抬到手机上能直接读出的尺寸；行高放开成可点的最小 40px */
+  .drawer .drawer-title { font-size: 14px; }
+  .drawer .panel-title { font-size: 13px; }
+  .drawer .count { font-size: 13px; }
+  .drawer .hint { font-size: 13px; }
+  .drawer .switch, .drawer .range { font-size: 15px; }
+  .drawer .switch em { font-size: 12.5px; }
+  .drawer .range output { font-size: 13px; }
+  .drawer .list li { font-size: 15px; padding: 9px 8px; }
+  .drawer .list .n { font-size: 13px; }
+  .drawer .list .sub { font-size: 12.5px; }
+  .drawer .chips li { font-size: 13px; padding: 8px 12px; }
+  .drawer .cc-sort button { font-size: 12px; padding: 7px 10px; }
+
   /* iOS 上字号小于 16px 的输入框一聚焦就整页放大，且不会自己缩回去 */
   input[type="search"], input[type="text"], select, .mini { font-size: 16px; }
 
@@ -527,6 +542,21 @@ button.more { flex: none; width: 36px; padding: 8px 0; text-align: center; }
   .stage-hint { padding: 8px 10px; }
   .srow .meta { display: none; }
   .vlist-inner > li { padding: 0 10px; }
+  /* 台名 13→15、副行 10→12；行高由 main.js 按同一断点把 44px 换成 56px，
+     两处必须一起改，否则放大后的两行字会被行内的 overflow:hidden 裁掉 */
+  .srow .rowline b { font-size: 15px; }
+  .srow .sub { font: 12px/1.35 var(--mono); }
+  .srow .flag { font-size: 16px; }
+  .srow .mark { font-size: 14px; }
+  .vlist-empty { font-size: 13px; }
+
+  /* 历史/收藏那一列同属「列表」，跟着放大 */
+  .rail .list li { font-size: 15px; padding: 9px 8px; }
+  .rail .list .n { font-size: 13px; }
+  .rail .list .sub { font-size: 12.5px; }
+  .rail .panel-title { font-size: 13px; }
+  .rail .count { font-size: 13px; }
+  .rail .panel-foot button { font-size: 13px; padding: 8px 10px; }
 
   .transport { gap: 8px; padding: 8px 10px calc(10px + env(safe-area-inset-bottom)); justify-content: center; }
   .transport button { min-height: 42px; }

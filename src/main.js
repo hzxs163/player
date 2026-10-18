@@ -486,11 +486,14 @@ function ccAnchor() {
 // 唯一的选台入口：6 万行不能全进 DOM，交给 createStationList 只画视口内的行。
 
 function initList() {
+  // 行高写在内联样式上（虚拟定位），CSS 断点改不动它，所以由这里按断点报数：
+  // 手机上字号要更大，行也得跟着高，否则两行字挤出 44px 就被 overflow:hidden 裁掉
   list = createStationList({
     root: els.stationList,
-    rowHeight: 44,
+    rowHeight: () => (NARROW.matches ? 56 : 44),
     renderRow: (i) => stationRow(i),
   });
+  NARROW.addEventListener('change', () => list.resize());
   new ResizeObserver(() => list.resize()).observe(els.stationList);
 }
 
