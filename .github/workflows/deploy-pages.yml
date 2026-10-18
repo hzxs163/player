@@ -38,7 +38,11 @@ jobs:
           test -s site/vendor/hls.light.min.mjs
           grep -q 'id="station-list"' site/index.html
 
+      # 新仓库此时还没有 Pages 站点，enablement 让这一步顺手把它开出来，
+      # 否则 configure-pages 直接报 Get Pages site failed / Not Found
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
