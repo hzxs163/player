@@ -28,6 +28,7 @@ public final class MainActivity extends Activity {
     private static final int REQ_NOTIF = 7;
 
     private WebView web;
+    private ShellBridge shell;
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -35,6 +36,7 @@ public final class MainActivity extends Activity {
 
         WebView w = new WebView(this);
         web = w;
+        shell = new ShellBridge(this);
         // 和页面 --ink 同色：冷启那一下不闪白屏
         w.setBackgroundColor(0xFF0A0F14);
 
@@ -53,9 +55,11 @@ public final class MainActivity extends Activity {
 
         w.setWebViewClient(new ShellClient(this));
         w.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
-        fitSystemBars(w);
         w.addJavascriptInterface(new StoreBridge(this), "ShiBoStore");
         w.addJavascriptInterface(new MediaBridge(this), "ShiBoMedia");
+        w.addJavascriptInterface(shell, "ShiBoShell");
+        shell.attach(w);
+        fitSystemBars(w);
 
         if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
             WebView.setWebContentsDebuggingEnabled(true);
@@ -81,34 +85,49 @@ public final class MainActivity extends Activity {
 
     /**
      * 状态栏不再压着页面：targetSdk 35 起安卓强制铺满整屏（edge-to-edge），
-     * 顶栏会直接钻到时钟和信号图标底下（真机截图实测就是这样）。
+     * 顶栏会直接钻到时钟和信号图标底下（真机截图实测就是这样，v1.0.0、v1.0.1 都没治住）。
      *
-     * 这里把系统栏尺寸吃成 WebView 的内边距，让出来的那条带子露出 windowBackground
-     * （@color/ink，和页面底色同值），而不是让页面去猜状态栏多高。
-     * 30 以下不动：那边还是框架自己留白，我们再叠一层就成了双重间距。
+     * 两版各自的病根：
+     * - v1.0.0 是 CSS 的错，padding: 8px 10px calc(8px + env(safe-area-inset-top)) 三个值的意思是
+     *   「上 / 左右 / 下」，安全区被加到了 padding-bottom 上，顶栏里的字一寸都没让开；
+     * - v1.0.1 把系统栏尺寸吃成 WebView 的 padding，实测仍然压着，而这台机器上没有通道能证明
+     *   那次 padding 到底生没生效（监听器有没有派发、Chromium 认不认这个 padding，都是猜）。
      *
-     * 取尺寸只认 getInsets(mask)，不走两条看着更短的路：
-     * - getSystemWindowInsets()：CI 实测 compileSdk 35 上它回的是 android.graphics.Insets
-     *   而不是 Rect（incompatible types: Insets cannot be converted to Rect），
-     *   返回类型在版本间挪过位置，拿它赌低版本设备上的实现在签名上会翻 NoSuchMethodError；
-     * - getSystemWindowInsetTop()/Bottom() 那组 int 便捷方法：值里会掺进输入法高度，
-     *   键盘一弹出来就被当成常驻内边距用。
-     * systemBars 之外还要并上 displayCutout，否则刘海机横屏时内容会钻到缺口中。
-     * Type 这组常量挂在 android.view.WindowInsets 上，不是 android.window.WindowInsets
-     * （CI 实测：package android.window.WindowInsets does not exist）。
+     * 所以这版换成「原生只量，页面自己让」：量到的尺寸经 ShellBridge 交给页面写成 --shell-*，
+     * 由 .topbar/.transport/.drawer 加自己的 padding。这条链路每一步都能在设置抽屉里看见数值，
+     * 顶栏底色还能一直铺到状态栏后面不留接缝；浏览器那边同一份 CSS 走 env()，两条取 max 不会重复让。
+     *
+     * 30 以下整个跳过：那边框架本来就把内容压在状态栏下面，页面再让一次就成了双重留白。
+     *
+     * 尺寸来源只认 getInsets(mask)（Type 常量挂在 android.view.WindowInsets 上，
+     * 不是 android.window.WindowInsets——CI 实测 package android.window.WindowInsets does not exist），
+     * 不走看着更短的两条：getSystemWindowInsets() 在 compileSdk 35 上回的是 Insets 而不是 Rect
+     * （incompatible types: Insets cannot be converted to Rect，返回类型在版本间挪过位置，
+     * 拿它赌低版本设备的实现有翻 NoSuchMethodError 的风险）；
+     * getSystemWindowInsetTop()/Bottom() 那组便捷方法的值里掺输入法高度，键盘一弹出来就被当成常驻内边距。
+     * systemBars 之外并上 displayCutout，否则刘海机横屏时内容会钻进缺口。
      */
     private void fitSystemBars(WebView w) {
         if (Build.VERSION.SDK_INT < 30) return;
         getWindow().setDecorFitsSystemWindows(false);
-        final int mask = WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout();
+        // 先把框架自报的状态栏高度垫给页面：监听器一次都没派发（v1.0.1 疑似就是这么静默的）
+        // 或者派发得太晚，页面 init 那一次拉取至少有个接近真值的数拿着。监听器一来就覆盖掉。
+        shell.pushInsets(statusBarHeightPx(), 0, 0, 0);
         w.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
             @Override
             public WindowInsets onApplyWindowInsets(View view, WindowInsets insets) {
-                Insets r = insets.getInsets(mask);
-                view.setPadding(r.left, r.top, r.right, r.bottom);
+                Insets s = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                // 量到 0 也要有状态栏高度垫底；bottom 不设下限：手势条有没有、多高因机型而异，硬垫会白吃一条空间
+                shell.pushInsets(Math.max(s.top, statusBarHeightPx()), s.right, s.bottom, s.left);
                 return insets;
             }
         });
+    }
+
+    /** 框架自己的状态栏高度（@android:dimen/status_bar_height），机型不认时给 0。 */
+    private int statusBarHeightPx() {
+        int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        return id > 0 ? getResources().getDimensionPixelSize(id) : 0;
     }
 
     @Override

@@ -65,6 +65,7 @@ const els = {
   btnMore: $('btn-more'), ctrlMore: $('ctrl-more'),
   volume: $('volume'), volOut: $('vol-out'), btnMute: $('btn-mute'),
   sleep: $('sleep'), sleepOut: $('sleep-out'), status: $('status'),
+  shellInfo: $('shell-info'),
   audio: $('audio'),
 };
 
@@ -73,11 +74,40 @@ const NARROW = matchMedia('(max-width: 760px)');
 
 // 安卓套壳：通知栏的播控键直接点在现有按钮上——它们已经含了「暂停/继续/换台/翻历史」的全部判断，
 // 复制一份逻辑迟早和页面上的按钮分叉。浏览器里 shell.native 为 false，下面是零成本的路过。
+//
+// 系统栏留白走的是「原生量、页面让」：给 WebView 加 padding 那条路在真机上治不住（v1.0.1 实测），
+// 而 CSS 的 env(safe-area-inset-*) 在套壳里给的是 0。这里把量到的数写成 --shell-* 四个变量，
+// CSS 那头用 max(env(...), var(--shell-*)) 取值——浏览器里 env 有值、变量是 0，套壳里正好反过来，
+// 两边都只会加一次。数值原样显示在设置抽屉里：下次再出问题，一张截图就能分清是量错了、
+// 还是根本没装上新版。
+let shellVersion = '';   // createShell 回来才有值，先占好位置（applyInsets 会在它之前跑一次）
+let lastInsets = [0, 0, 0, 0];
+
+function applyInsets(px) {
+  lastInsets = px;
+  const s = document.documentElement.style;
+  s.setProperty('--shell-top', px[0] + 'px');
+  s.setProperty('--shell-right', px[1] + 'px');
+  s.setProperty('--shell-bottom', px[2] + 'px');
+  s.setProperty('--shell-left', px[3] + 'px');
+  renderShellInfo();
+}
+
+function renderShellInfo() {
+  if (!shellVersion) return;
+  els.shellInfo.hidden = false;
+  els.shellInfo.textContent =
+    `套壳 v${shellVersion} · 原生量到的系统栏留白（上 ${lastInsets[0]} 右 ${lastInsets[1]} 下 ${lastInsets[2]} 左 ${lastInsets[3]} px）`;
+}
+
 const shell = createShell(window, {
   toggle: () => els.btnPlay.click(),
   next: () => els.btnNext.click(),
   prev: () => els.btnPrev.click(),
+  onInsets: applyInsets,
 });
+shellVersion = shell.version;
+renderShellInfo();
 
 const state = {
   ds: null, ids: null, uuidToIdx: null, idsPromise: null,

@@ -366,6 +366,39 @@ const winCrash = { ShiBoMedia: { setPlaying: () => { throw new Error('宿主崩�
 createShell(winCrash, {}).send(true, 'a', 'b');
 eq('宿主 setPlaying 抛错不冒泡回页面', true, true);
 
+// ---------- 套壳的系统栏留白（原生量到的 "上 右 下 左" 交回页面写成 --shell-*） ----------
+import { parseInsets } from '../src/native-bridge.js';
+
+eq('正常四个数按顺序解开', parseInsets('24 0 48 0'), [24, 0, 48, 0]);
+eq('逗号分隔、带空白也能解', parseInsets(' 12, 0 , 30 , 8 '), [12, 0, 30, 8]);
+eq('小数按四舍五入成整数 px', parseInsets('23.6 0 0 0'), [24, 0, 0, 0]);
+eq('少一个数就当没有（宁可不留白也不顶出坏布局）', parseInsets('24 0 48'), [0, 0, 0, 0]);
+eq('负数或乱写的字符串同样当没有', [parseInsets('-4 0 0 0'), parseInsets('abc'), parseInsets(''), parseInsets(null)],
+  [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]);
+
+eq('浏览器里没有 ShiBoShell：留白全 0、版本空串', [shellOff.insets, shellOff.version], [[0, 0, 0, 0], '']);
+
+const insetsSeen = [];
+const winPx = {
+  ShiBoMedia: { setPlaying() {} },
+  ShiBoShell: { insets: () => '24 0 48 0', version: () => '1.0.2' },
+};
+const shellPx = createShell(winPx, { toggle: () => {}, onInsets: (px) => insetsSeen.push(px) });
+eq('建桥时就拉一次，页面 init 立刻有数可用', [shellPx.insets, insetsSeen], [[24, 0, 48, 0], [[24, 0, 48, 0]]]);
+eq('版本号从 ShiBoShell.version() 来', shellPx.version, '1.0.2');
+winPx.ShiBoShell.insets = () => '0 21 0 21';   // 转屏：左右让刘海
+eq('宿主喊一声就重读，回给页面的和它自己拿到的是同一个数',
+  [winPx.ShiBoNative.onInsets(), insetsSeen], [[0, 21, 0, 21], [[24, 0, 48, 0], [0, 21, 0, 21]]]);
+eq('没有 ShiBoShell 时 onInsets 只会给全 0（没有数就不假装让了位）',
+  [typeof winShell.ShiBoNative.onInsets, winShell.ShiBoNative.onInsets()], ['function', [0, 0, 0, 0]]);
+
+const winBadPx = {
+  ShiBoMedia: { setPlaying() {} },
+  ShiBoShell: { insets: () => { throw new Error('桥断了'); }, version: () => { throw new Error('也断了'); } },
+};
+const shellBadPx = createShell(winBadPx, { onInsets: () => { throw new Error('页面布局炸了'); } });
+eq('桥两头都抛时留白当 0、版本空串，建桥本身不炸', [shellBadPx.insets, shellBadPx.version], [[0, 0, 0, 0], '']);
+
 // ---------- gzip 兜底提示 ----------
 const roundTrip = await C.inflate(gz);
 eq('inflate 往返等于原文件', new TextDecoder().decode(roundTrip).length, text.length);

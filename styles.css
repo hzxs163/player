@@ -16,6 +16,12 @@
   --red: #e2635c;
   --mono: ui-monospace, "Cascadia Mono", "DejaVu Sans Mono", Consolas, monospace;
   --sans: system-ui, "Segoe UI", "Noto Sans SC", Roboto, sans-serif;
+  /* 套壳（安卓 WebView）里原生量到的系统栏尺寸，由 main.js 按 window.ShiBoShell 写成 4 个 px。
+     浏览器里恒为 0，安全区靠 env(safe-area-inset-*)；两边取 max，所以永远不会重复留白。 */
+  --shell-top: 0px;
+  --shell-right: 0px;
+  --shell-bottom: 0px;
+  --shell-left: 0px;
 }
 
 * { box-sizing: border-box; }
@@ -56,6 +62,13 @@ body {
   align-items: center;
   gap: 14px;
   padding: 10px 14px;
+  /* 状态栏/刘海/手势条占的那一条要让出来：浏览器读 env()，套壳读原生量到的 --shell-*。
+     先留一条不含 max() 的普通 padding 给不支持这两个函数的老 WebView 兜底（后面的声明失效就退回它） */
+  padding-top: calc(10px + max(env(safe-area-inset-top, 0px), var(--shell-top, 0px)));
+  padding-left: calc(14px + max(env(safe-area-inset-left, 0px), var(--shell-left, 0px)));
+  padding-right: calc(14px + max(env(safe-area-inset-right, 0px), var(--shell-right, 0px)));
+  padding-left: calc(14px + max(env(safe-area-inset-left, 0px), var(--shell-left, 0px)));
+  padding-right: calc(14px + max(env(safe-area-inset-right, 0px), var(--shell-right, 0px)));
   background: var(--ink-2);
   border-bottom: 1px solid var(--hair);
 }
@@ -131,6 +144,10 @@ select { cursor: pointer; }
   width: min(376px, 94vw);
   display: flex; flex-direction: column; gap: 10px;
   padding: 10px; overflow: hidden auto;
+  /* 抽屉是 top:0 的整高浮层，压住它的同样是状态栏那一条（手机上的写法在 760px 断点里） */
+  padding-top: calc(10px + max(env(safe-area-inset-top, 0px), var(--shell-top, 0px)));
+  padding-left: calc(10px + max(env(safe-area-inset-left, 0px), var(--shell-left, 0px)));
+  padding-bottom: calc(10px + max(env(safe-area-inset-bottom, 0px), var(--shell-bottom, 0px)));
   background: var(--ink-2);
   border-right: 1px solid var(--hair);
   box-shadow: 24px 0 48px rgba(0, 0, 0, .55);
@@ -413,6 +430,9 @@ details.np-more .kv { margin-top: 6px; }
   grid-area: foot;
   display: flex; align-items: center; gap: 10px;
   padding: 9px 14px;
+  padding-bottom: calc(9px + max(env(safe-area-inset-bottom, 0px), var(--shell-bottom, 0px)));
+  padding-left: calc(14px + max(env(safe-area-inset-left, 0px), var(--shell-left, 0px)));
+  padding-right: calc(14px + max(env(safe-area-inset-right, 0px), var(--shell-right, 0px)));
   background: var(--ink-2);
   border-top: 1px solid var(--hair);
 }
@@ -494,7 +514,12 @@ button.more { flex: none; width: 36px; padding: 8px 0; text-align: center; }
   .topbar {
     position: sticky; top: 0; z-index: 7;
     flex-wrap: wrap; gap: 8px;
-    padding: 8px 10px calc(8px + env(safe-area-inset-top));
+    padding: 8px 10px;
+    /* 这三条必须在 shorthand 之后：shorthand 会把四个方向一起重置，
+       而上一版就是把安全区写进了 shorthand 的第 3 个位置（padding-bottom）——顶栏白让了 */
+    padding-top: calc(8px + max(env(safe-area-inset-top, 0px), var(--shell-top, 0px)));
+    padding-left: calc(10px + max(env(safe-area-inset-left, 0px), var(--shell-left, 0px)));
+    padding-right: calc(10px + max(env(safe-area-inset-right, 0px), var(--shell-right, 0px)));
   }
   .brand-sub { display: none; }
   .topsearch { order: 3; flex-basis: 100%; }
@@ -509,7 +534,10 @@ button.more { flex: none; width: 36px; padding: 8px 0; text-align: center; }
      右边留一条能点穿的缝，所以用 100vw 盖严 */
   .drawer {
     width: 100vw; left: 0; right: 0;
-    padding: 10px 12px calc(14px + env(safe-area-inset-bottom));
+    padding: 10px 12px;
+    padding-top: calc(10px + max(env(safe-area-inset-top, 0px), var(--shell-top, 0px)));
+    padding-left: calc(12px + max(env(safe-area-inset-left, 0px), var(--shell-left, 0px)));
+    padding-bottom: calc(14px + max(env(safe-area-inset-bottom, 0px), var(--shell-bottom, 0px)));
     border-right: 0;
   }
   .drawer .drawer-head button { min-height: 40px; padding: 0 14px; }
@@ -558,7 +586,13 @@ button.more { flex: none; width: 36px; padding: 8px 0; text-align: center; }
   .rail .count { font-size: 13px; }
   .rail .panel-foot button { font-size: 13px; padding: 8px 10px; }
 
-  .transport { gap: 8px; padding: 8px 10px calc(10px + env(safe-area-inset-bottom)); justify-content: center; }
+  .transport {
+    gap: 8px; justify-content: center;
+    padding: 8px 10px;
+    padding-bottom: calc(10px + max(env(safe-area-inset-bottom, 0px), var(--shell-bottom, 0px)));
+    padding-left: calc(10px + max(env(safe-area-inset-left, 0px), var(--shell-left, 0px)));
+    padding-right: calc(10px + max(env(safe-area-inset-right, 0px), var(--shell-right, 0px)));
+  }
   .transport button { min-height: 42px; }
   .transport .status { text-align: center; font-size: 10px; }
   #btn-prev { order: 0; }

@@ -157,7 +157,8 @@ public final class PlayService extends Service {
 
         b.setContentTitle(title.isEmpty() ? getString(R.string.notif_title) : title)
                 .setContentText(sub)
-                .setSubText(getString(R.string.app_name))
+                // 通知栏这行带版本号：截图里能看出装的是哪一版，不必再来回问「你更新了吗」
+                .setSubText(getString(R.string.app_name) + " v" + ShellBridge.versionName(this))
                 .setSmallIcon(R.drawable.ic_stat_shibo)
                 .setColor(0xFF58C7BD)
                 .setContentIntent(content)

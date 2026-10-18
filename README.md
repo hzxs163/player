@@ -63,6 +63,7 @@ scripts/verify-live.mjs 校验 Pages 上真实响应回来的字节 == 清单（
 - **`http://127.0.0.1` 也算安全上下文**，页面里的 http 流会被当成混合内容拦掉。判断用 `self.isSecureContext`，不能用 `location.protocol === 'https:'`。
 - **经纬度是电台自己填的**，实测有 100.5°N、−273°W 这种越界值，解码时统一打回「无坐标」，否则国家质心被拉偏、当地时间算出负数。
 - **快照每天重排**，所以收藏和历史存 `stationuuid` 而不是数组下标；下标只在当天有效。
+- **`padding: 8px 10px calc(8px + env(safe-area-inset-top))` 这三个值是「上 / 左右 / 下」**，不是「上 / 左右 / 下安全区」。v1.0.0 的手机端顶栏就是这么写的，安全区被加到了 padding-bottom，顶栏里的字一寸没让，看着就像被状态栏压住。要动某个方向就单独写那个 longhand，而且必须排在 shorthand 之后（顺序反了会被 shorthand 一起重置掉）。
 - 数据是 `.gz` 直发（不设 `Content-Encoding`），浏览器用 `DecompressionStream` 解，这样进度条量的是真实下载字节。
 
 ## 部署
@@ -79,6 +80,7 @@ Pages 站点本身要先用 REST 建成 workflow 构建方式（`POST /repos/hzx
 - **数据不打包**，仍从 `hzxs163.github.io/radio-browser-snapshot/` 取（Pages 发了 `Access-Control-Allow-Origin: *`，跨源可读）。这样电台数据天天新，APK 不必跟着重出。
 - **本地优先靠 `ShiBoStore`**：`window.ShiBoStore` 是 `StoreBridge` 暴露的私有目录文件读写，页面 `src/cache.js` 用它存 7.7 MB 的解压快照（localStorage 装不下）。首次运行下载存盘；之后开屏先读磁盘秒开，版本旧了再后台重下一份写盘，本次收听不打断；断网时用上次那份并写明「本机快照（离线）」。
 - **后台继续播**：`PlayService` 是 `mediaPlayback` 前台服务 + `MediaSession`，通知栏三个键通过 `evaluateJavascript` 打回页面的 `window.ShiBoNative.onTransport`，动作直接点在现有按钮上（判断逻辑只有一份）。`MainActivity.onPause()` 故意不调 `webView.onPause()`——那会让 Chromium 挂起音频，锁屏就断了。
+- **系统栏留白是「原生量、页面让」**：targetSdk 35 起安卓强制铺满整屏，顶栏会压在状态栏底下。`MainActivity` 用 `WindowInsets.getInsets(systemBars | displayCutout)` 量出四个方向（按 density 折成 CSS px），经 `window.ShiBoShell.insets()` 交给页面写成 `--shell-top/right/bottom/left`，CSS 那头一律 `calc(基线 + max(env(safe-area-inset-*, 0px), var(--shell-*)))`——浏览器里 env 有值、变量是 0，套壳里正好反过来，两边都只会让一次。量到的数值和 APK 版本号一起显示在设置抽屉的「数据源」里（通知栏那行也带版本号）：下次再出问题，一张截图就能分清是量错了还是没装上新版。给 WebView 加 padding 那条路（v1.0.1）在真机上治不住，而且坏了没有任何可观测的落点。
 - **签名用仓库内置的 `android/keystore/shibo.p12`**（别名 `shibo`，口令写在 `android/app/build.gradle`）。这是为了让每次构建出同一个签名，覆盖安装不会 `INSTALL_FAILED_UPDATE_INCOMPLETE`；代价是这把钥匙对所有人可见——它只用于这一个 app，任何别的发布物都不要复用它。
 
 发版：打标签 `app-v1.0.0` 推上去，`.github/workflows/build-app.yml` 会构建 release APK、校验（页面字节 = 构建清单 = 仓库文件；类在 dex 里；签名证书就是仓库那张），再把它作为 GitHub Release 资产发布。也可以手动触发 workflow 填版本号重出。
