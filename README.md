@@ -61,4 +61,6 @@ vendor/               hls.js light 构建（MIT，许可证同目录）
 
 ## 部署
 
-`.github/workflows/deploy-pages.yml`：push 到 `main` 触发，挑出运行时的文件（不含 `data/`、`test/`、`scripts/`）作为 Pages 产物发布。GitHub Pages 已经用 Actions 构建方式，不需要额外开开关。
+`.github/workflows/deploy-pages.yml`：push 到 `main` 触发，挑出运行时的文件（不含 `data/`、`test/`、`scripts/`）作为 Pages 产物发布，线上根路径就是 `index.html`。
+
+Pages 站点本身要先用 REST 建成 workflow 构建方式（`POST /repos/hzxs163/player/pages`，body `{"build_type":"workflow"}`）：`configure-pages` 的 `enablement` 用 GITHUB_TOKEN 建站点会被账号设置挡掉，报 `Resource not accessible by integration`。建好之后每次 push 自动发版，不用再碰开关。

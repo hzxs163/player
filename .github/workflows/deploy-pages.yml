@@ -38,8 +38,9 @@ jobs:
           test -s site/vendor/hls.light.min.mjs
           grep -q 'id="station-list"' site/index.html
 
-      # 新仓库此时还没有 Pages 站点，enablement 让这一步顺手把它开出来，
-      # 否则 configure-pages 直接报 Get Pages site failed / Not Found
+      # Pages 站点必须先用 REST（build_type: workflow）建好：configure-pages 的
+      # enablement 走的是 GITHUB_TOKEN，账号级设置里它没有创建站点的权限，
+      # 会报 Resource not accessible by integration
       - uses: actions/configure-pages@v5
         with:
           enablement: true
