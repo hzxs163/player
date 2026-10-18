@@ -491,7 +491,11 @@ button.more { flex: none; width: 36px; padding: 8px 0; text-align: center; }
   }
   .brand-sub { display: none; }
   .topsearch { order: 3; flex-basis: 100%; }
-  .setbtn { order: 4; margin-left: auto; min-height: 40px; padding: 0 14px; }
+  /* 第一行固定为：品牌 … 数据集状态 · 设置（右上角）；搜索自己占第二行。
+     数据集那行字有 20 多个字，不截断就会把设置挤到第二行去 */
+  .dataset { order: 1; margin-left: auto; max-width: 46vw; min-width: 0; }
+  #ds-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .setbtn { order: 2; min-height: 40px; padding: 0 14px; flex: none; }
   .setbtn kbd { display: none; }
 
   /* 抽屉在手机上占满整屏：100% 是相对 fixed 元素的 ICB，会少了竖向滚动条那 15px，

@@ -87,6 +87,8 @@ let list = null;
 function setDs(kind, text) {
   els.dataset.className = 'dataset' + (kind ? ' is-' + kind : '');
   els.dsText.textContent = text;
+  // 手机上这行会被截断，完整状态留给悬停/长按的 title
+  els.dataset.title = '数据集状态：' + text;
 }
 
 function setStatus(text, kind) {
