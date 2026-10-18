@@ -1,6 +1,6 @@
-# 临时排障用：作业日志匿名 API 拿不到（403），所以在这条流水线里把 Gradle 的输出
-# 摘成 commit comment —— 提交信息带 ci-report 才会跑，正常发版不触发。
-# 定位到编译错误、修好之后这个文件就该删掉。
+# 临时排障用：作业日志匿名 API 拿不到（403），匿名限额又是 60/小时，
+# 所以把完整构建日志压回一个 ci-logs 分支 —— 本地用 SSH fetch 读，不受限额影响。
+# 提交信息带 ci-report 才会跑；定位完就把这个文件和 ci-logs 分支一起删掉。
 name: ci-report
 on:
   push:
@@ -16,6 +16,14 @@ jobs:
     if: contains(github.event.head_commit.message, 'ci-report')
     steps:
       - uses: actions/checkout@v4
+      - name: 环境体检
+        run: |
+          set -uo pipefail
+          echo "ANDROID_HOME=${ANDROID_HOME:-} ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
+          ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}/platforms" 2>&1 | sed 's/^/platform: /'
+          ls "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" 2>&1 | sed 's/^/build-tools: /'
+          java -version 2>&1 | sed 's/^/java: /'
+          gradle --version 2>&1 | sed 's/^/gradle: /' || true
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -27,25 +35,36 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          gradle -p android assembleRelease --no-daemon --console=plain \
+          gradle -p android assembleRelease --no-daemon --console=plain --stacktrace \
             -Pshibo.version=1.0.0 > build.log 2>&1
           echo "gradle-exit=$?" >> build.log
-      - name: 把结果写成 commit comment
+          grep -c . build.log | sed 's/^/log 行数: /'
+      - name: 摘要贴成 commit comment
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           {
             echo "## 安卓构建回执（run $GITHUB_RUN_ID）"
-            echo
             echo '```'
-            grep -nE "error:|FAILURE|FAILED|What went wrong|^> Task |BUILD |gradle-exit|e: |Could not|not found" build.log | tail -n 45 || true
-            echo '```'
-            echo
-            echo '--- 日志尾部 ---'
-            echo '```'
-            tail -c 5200 build.log
+            grep -nE "error:|FAILURE|FAILED|What went wrong|^> Task |BUILD |gradle-exit|Could not" build.log | tail -n 40 || true
             echo '```'
           } > report.md
           gh api --method POST "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" \
-            -f body="$(cat report.md)" -q .html_url
+            -f body="$(cat report.md)" -q .html_url || true
+      - name: 完整日志压回 ci-logs 分支
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          # 空仓库单独建：直接在主工作区开孤儿分支会把整棵 main 一起提交进去
+          rm -rf ../cilog && mkdir -p ../cilog && cd ../cilog
+          git init -q
+          git config user.name "ci-report"
+          git config user.email "ci-report@users.noreply.github.com"
+          cp "$GITHUB_WORKSPACE/build.log" "android-${GITHUB_SHA:0:7}.log"
+          git add -A
+          git commit -qm "ci log ${GITHUB_SHA:0:7}"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/$GITHUB_REPOSITORY.git" \
+            HEAD:refs/heads/ci-logs
