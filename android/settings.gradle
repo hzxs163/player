@@ -6,7 +6,17 @@ pluginManagement {
     }
 }
 
-// 工程零第三方依赖（只用框架 API），所以这里不声明 dependencyResolutionManagement：
-// AGP 及其传递依赖走 pluginManagement 的仓库就够了，少写一段就少一种在 CI 上翻车的姿势。
+// 零第三方依赖不等于零仓库：aapt2、zipflinger 这些构建工具本身是 AGP 声明的「外部构件」，
+// 走的是项目级仓库而不是 pluginManagement。少了下面这段，mergeReleaseResources 会报
+// "Cannot resolve external dependency com.android.tools.build:aapt2 ... no repositories are defined"。
+// FAIL_ON_PROJECT_REPOS 让仓库只认这一处，模块里再冒出一个 repositories{} 就直接失败。
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
 rootProject.name = 'shibo'
 include ':app'
