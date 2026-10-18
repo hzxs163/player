@@ -6,6 +6,7 @@ name: ci-report
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 permissions:
   contents: write
 concurrency:
@@ -14,7 +15,8 @@ concurrency:
 jobs:
   report:
     runs-on: ubuntu-latest
-    if: contains(github.event.head_commit.message, 'ci-report')
+    # 上一版踩过的坑：只靠提交信息里的关键词，写漏一个字整条 job 静默 skipped。
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'ci-report')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
