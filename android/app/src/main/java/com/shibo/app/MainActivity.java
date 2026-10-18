@@ -7,7 +7,9 @@ import android.content.pm.PackageManager;
 import android.graphics.Insets;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 
@@ -92,15 +94,16 @@ public final class MainActivity extends Activity {
      * - getSystemWindowInsetTop()/Bottom() 那组 int 便捷方法：值里会掺进输入法高度，
      *   键盘一弹出来就被当成常驻内边距用。
      * systemBars 之外还要并上 displayCutout，否则刘海机横屏时内容会钻到缺口中。
+     * Type 这组常量挂在 android.view.WindowInsets 上，不是 android.window.WindowInsets
+     * （CI 实测：package android.window.WindowInsets does not exist）。
      */
     private void fitSystemBars(WebView w) {
         if (Build.VERSION.SDK_INT < 30) return;
         getWindow().setDecorFitsSystemWindows(false);
-        final int mask = android.window.WindowInsets.Type.systemBars()
-                | android.window.WindowInsets.Type.displayCutout();
-        w.setOnApplyWindowInsetsListener(new android.view.View.OnApplyWindowInsetsListener() {
+        final int mask = WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout();
+        w.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
             @Override
-            public android.view.WindowInsets onApplyWindowInsets(android.view.View view, android.view.WindowInsets insets) {
+            public WindowInsets onApplyWindowInsets(View view, WindowInsets insets) {
                 Insets r = insets.getInsets(mask);
                 view.setPadding(r.left, r.top, r.right, r.bottom);
                 return insets;
