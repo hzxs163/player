@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>拾波 · 随机电台收信台</title>
+<meta name="description" content="从 Radio Browser 公开电台库随机收听，支持国家/语言/风格筛选与收听历史。">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div id="app" class="shell">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">拾波</span>
+      <span class="brand-sub">随机电台收信台</span>
+    </div>
+    <div class="dataset" id="dataset-info" title="数据集状态">
+      <span class="dot" id="ds-dot"></span>
+      <span id="ds-text">准备中…</span>
+    </div>
+    <div class="topsearch">
+      <input id="q" type="search" placeholder="搜索电台名或风格标签（按 / 聚焦）" autocomplete="off" aria-label="搜索电台名或标签">
+    </div>
+    <label class="srcpick">
+      <span>数据源</span>
+      <select id="source-select" aria-label="数据源"></select>
+    </label>
+  </header>
+
+  <aside class="rail rail-left">
+    <section class="panel">
+      <h2 class="panel-title">随机池 <span class="count" id="pool-count">—</span></h2>
+      <div class="poolbar" aria-hidden="true"><i id="pool-fill"></i></div>
+      <p class="hint" id="pool-note">载入全库后开始统计</p>
+      <button id="btn-reset" class="ghost tiny">清除全部条件</button>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">开关</h2>
+      <label class="switch"><input type="checkbox" id="f-secure"><span>只播 https 流</span><em>默认不限制：http 地址在播放前会先升级成 https 再试（页面在安全上下文里时，浏览器只放行 https 子资源），带端口升不了的台会直接跳过</em></label>
+      <label class="switch"><input type="checkbox" id="f-hls"><span>排除 HLS 流</span><em>m3u8 由 hls.js 播放（第一次遇到时多下约 113KB），Safari 走原生</em></label>
+      <label class="switch"><input type="checkbox" id="f-geo"><span>只要有坐标的台</span></label>
+      <label class="range"><span>最低票数</span><output id="o-votes">0</output>
+        <input type="range" id="f-votes" min="0" max="200" step="1" value="0"></label>
+      <label class="range"><span>最低码率</span><output id="o-br">0</output>
+        <input type="range" id="f-br" min="0" max="320" step="32" value="0"></label>
+    </section>
+
+    <section class="panel grow">
+      <h2 class="panel-title">国家 <span class="count" id="cc-count">—</span></h2>
+      <input id="cc-filter" type="search" class="mini" placeholder="过滤国家（中文/英文/两字母码）" aria-label="过滤国家">
+      <div class="cc-sort">
+        <button id="cc-sort" class="ghost tiny" data-sort="pos">按远近</button>
+        <span class="hint" id="cc-sort-note">离你近的在前</span>
+      </div>
+      <ul class="list" id="cc-list" role="listbox" aria-label="国家列表"></ul>
+    </section>
+
+    <section class="panel grow">
+      <h2 class="panel-title">风格 <span class="count" id="tag-count">—</span></h2>
+      <input id="tag-filter" type="search" class="mini" placeholder="过滤风格标签" aria-label="过滤风格标签">
+      <ul class="chips" id="tag-list"></ul>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">语言 <span class="count" id="lang-count">—</span></h2>
+      <select id="lang-select" class="mini" aria-label="按语言筛选"><option value="">不限</option></select>
+      <p class="hint" id="lang-note"></p>
+    </section>
+  </aside>
+
+  <section class="deck" id="deck">
+    <div class="deck-head">
+      <span class="np-state" id="np-state">空闲</span>
+      <span class="deck-where" id="np-country"></span>
+      <span class="deck-clock" id="np-clock"></span>
+    </div>
+    <h3 class="np-name" id="np-name">等待选台</h3>
+    <div class="deck-sub" id="np-sub">按 N 随机一台，或在下方列表里挑</div>
+    <div class="dial" id="dial" aria-label="调谐刻度：中间是当前台，两侧是筛选结果里的相邻电台，点名字直接换台"></div>
+    <div class="np-actions">
+      <button id="btn-fav" class="ghost">☆ 收藏</button>
+      <button id="btn-next" class="ghost">换一台</button>
+    </div>
+    <details class="np-more" id="np-more" open>
+      <summary>收信参数 · <span id="np-quick">—</span></summary>
+      <dl class="kv">
+        <div><dt>编码</dt><dd id="np-codec">—</dd></div>
+        <div><dt>码率</dt><dd id="np-bitrate">—</dd></div>
+        <div><dt>票数</dt><dd id="np-votes">—</dd></div>
+        <div><dt>坐标</dt><dd id="np-geo">—</dd></div>
+        <div><dt>上报</dt><dd id="np-report">—</dd></div>
+        <div><dt>风格</dt><dd id="np-tags">—</dd></div>
+        <div class="kv-wide"><dt>地址</dt><dd id="np-url">—</dd></div>
+      </dl>
+    </details>
+  </section>
+
+  <main class="stage">
+    <p class="stage-hint" id="stage-hint">载入快照后列出筛选命中的电台</p>
+    <div class="stationlist" id="station-list"></div>
+    <div class="overlay" id="overlay">
+      <div class="overlay-card">
+        <h2 id="ov-title">拾波</h2>
+        <p id="ov-body">正在拉取 Radio Browser 官方全库快照…</p>
+        <div class="bar"><i id="ov-bar"></i></div>
+        <button id="ov-start" class="primary" hidden>开始收听</button>
+      </div>
+    </div>
+    <div class="toast" id="toast" hidden></div>
+  </main>
+
+  <aside class="rail rail-right">
+    <section class="panel grow tabs">
+      <div class="tabbar" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="history">历史</button>
+        <button role="tab" aria-selected="false" data-tab="favs">收藏</button>
+      </div>
+      <ul class="list" id="tab-history"></ul>
+      <ul class="list" id="tab-favs" hidden></ul>
+      <div class="panel-foot">
+        <button id="btn-export" class="ghost tiny">导出历史 CSV</button>
+        <button id="btn-clear" class="ghost tiny">清空历史</button>
+      </div>
+    </section>
+  </aside>
+
+  <footer class="transport">
+    <button id="btn-prev" class="ghost" aria-label="上一台（历史里的前一台）">⟨</button>
+    <button id="btn-play" class="play" aria-label="播放/暂停">▶</button>
+    <button id="btn-random" class="primary">随机一台 <kbd>N</kbd></button>
+    <button id="btn-nexthist" class="ghost" aria-label="下一台（历史里的后一台）">⟩</button>
+    <div class="ctrl-more" id="ctrl-more" hidden>
+      <div class="vol">
+        <button id="btn-mute" class="ghost tiny" aria-label="静音">♪</button>
+        <input type="range" id="volume" min="0" max="1" step="0.01" value="0.8" aria-label="音量">
+        <output id="vol-out">80%</output>
+      </div>
+      <label class="sleep"><span>睡眠</span>
+        <select id="sleep" aria-label="睡眠定时">
+          <option value="0">关</option><option value="15">15 分</option><option value="30">30 分</option>
+          <option value="60">60 分</option><option value="90">90 分</option>
+        </select>
+        <output id="sleep-out"></output>
+      </label>
+    </div>
+    <button id="btn-more" class="ghost more" aria-expanded="false" aria-controls="ctrl-more">⋯</button>
+    <div class="status" id="status">未开始</div>
+  </footer>
+</div>
+
+<audio id="audio" preload="none" crossorigin="anonymous"></audio>
+<script type="module" src="./src/main.js"></script>
+<noscript><p style="padding:2rem">这个播放器需要 JavaScript 与 gzip 流解压能力。</p></noscript>
+</body>
+</html>

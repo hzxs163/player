@@ -1,0 +1,48 @@
+name: deploy-pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 站点是零构建的原生 ES module：只挑运行时要发的文件，
+      # 免得 test/、scripts/ 和 3 MB 的本地快照 data/ 被一起挂到公网上
+      - name: 组装站点目录
+        run: |
+          set -euo pipefail
+          mkdir -p site/src site/vendor
+          cp index.html styles.css site/
+          cp src/*.js site/src/
+          cp vendor/hls.light.min.mjs vendor/hls.js-LICENSE site/vendor/
+          test -s site/index.html
+          test -s site/src/main.js
+          test -s site/src/core.js
+          test -s site/vendor/hls.light.min.mjs
+          grep -q 'id="station-list"' site/index.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
