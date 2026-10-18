@@ -4,7 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.graphics.Rect;
+import android.graphics.Insets;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.ViewGroup;
@@ -84,16 +84,24 @@ public final class MainActivity extends Activity {
      * 这里把系统栏尺寸吃成 WebView 的内边距，让出来的那条带子露出 windowBackground
      * （@color/ink，和页面底色同值），而不是让页面去猜状态栏多高。
      * 30 以下不动：那边还是框架自己留白，我们再叠一层就成了双重间距。
-     * 不用 getInsets(Type.systemBars()) 那套新 API，是为了少引一个 android.window 类型，
-     * 兼容路径上 getSystemWindowInsets() 各版本都给得出同样的矩形（javac 只会警告已废弃）。
+     *
+     * 取尺寸只认 getInsets(mask)，不走两条看着更短的路：
+     * - getSystemWindowInsets()：CI 实测 compileSdk 35 上它回的是 android.graphics.Insets
+     *   而不是 Rect（incompatible types: Insets cannot be converted to Rect），
+     *   返回类型在版本间挪过位置，拿它赌低版本设备上的实现在签名上会翻 NoSuchMethodError；
+     * - getSystemWindowInsetTop()/Bottom() 那组 int 便捷方法：值里会掺进输入法高度，
+     *   键盘一弹出来就被当成常驻内边距用。
+     * systemBars 之外还要并上 displayCutout，否则刘海机横屏时内容会钻到缺口中。
      */
     private void fitSystemBars(WebView w) {
         if (Build.VERSION.SDK_INT < 30) return;
         getWindow().setDecorFitsSystemWindows(false);
+        final int mask = android.window.WindowInsets.Type.systemBars()
+                | android.window.WindowInsets.Type.displayCutout();
         w.setOnApplyWindowInsetsListener(new android.view.View.OnApplyWindowInsetsListener() {
             @Override
             public android.view.WindowInsets onApplyWindowInsets(android.view.View view, android.view.WindowInsets insets) {
-                Rect r = insets.getSystemWindowInsets();
+                Insets r = insets.getInsets(mask);
                 view.setPadding(r.left, r.top, r.right, r.bottom);
                 return insets;
             }
