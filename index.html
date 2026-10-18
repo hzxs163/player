@@ -23,13 +23,18 @@
     <div class="topsearch">
       <input id="q" type="search" placeholder="搜索电台名或风格标签（按 / 聚焦）" autocomplete="off" aria-label="搜索电台名或标签">
     </div>
-    <label class="srcpick">
-      <span>数据源</span>
-      <select id="source-select" aria-label="数据源"></select>
-    </label>
+    <button id="btn-settings" class="ghost setbtn" aria-expanded="false" aria-controls="settings">
+      设置<span class="set-badge" id="set-badge" hidden>0</span><kbd>S</kbd>
+    </button>
   </header>
 
-  <aside class="rail rail-left">
+  <div class="scrim" id="set-scrim" hidden></div>
+  <aside class="drawer" id="settings" hidden aria-label="筛选与数据源">
+    <div class="drawer-head">
+      <h2 class="drawer-title">设置</h2>
+      <button id="set-close" class="ghost tiny" aria-label="关闭设置（Esc）">✕ 关闭</button>
+    </div>
+
     <section class="panel">
       <h2 class="panel-title">随机池 <span class="count" id="pool-count">—</span></h2>
       <div class="poolbar" aria-hidden="true"><i id="pool-fill"></i></div>
@@ -69,6 +74,12 @@
       <select id="lang-select" class="mini" aria-label="按语言筛选"><option value="">不限</option></select>
       <p class="hint" id="lang-note"></p>
     </section>
+
+    <section class="panel">
+      <h2 class="panel-title">数据源</h2>
+      <select id="source-select" class="mini" aria-label="数据源"></select>
+      <p class="hint">换源是整站重新下载，不是增量；探测顺序按列表从上往下，第一个读得到 <code>meta_web.json</code> 的为准</p>
+    </section>
   </aside>
 
   <section class="deck" id="deck">
@@ -78,7 +89,7 @@
       <span class="deck-clock" id="np-clock"></span>
     </div>
     <h3 class="np-name" id="np-name">等待选台</h3>
-    <div class="deck-sub" id="np-sub">按 N 随机一台，或在下方列表里挑</div>
+    <div class="deck-sub" id="np-sub">按 N 随机一台，按 S 开筛选，或在下方列表里挑</div>
     <div class="dial" id="dial" aria-label="调谐刻度：中间是当前台，两侧是筛选结果里的相邻电台，点名字直接换台"></div>
     <div class="np-actions">
       <button id="btn-fav" class="ghost">☆ 收藏</button>

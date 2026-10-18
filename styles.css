@@ -36,13 +36,13 @@ body {
 
 .shell {
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr) 336px;
+  grid-template-columns: minmax(0, 1fr) 336px;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   grid-template-areas:
-    "top top top"
-    "left deck right"
-    "left stage right"
-    "foot foot foot";
+    "top top"
+    "deck right"
+    "stage right"
+    "foot foot";
   height: 100vh;
   height: 100dvh;
   gap: 0;
@@ -92,8 +92,6 @@ body {
 .topsearch { flex: 1 1 auto; min-width: 0; }
 .topsearch input { width: 100%; }
 
-.srcpick { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-dim); flex: none; }
-
 input[type="search"], input[type="text"], select, .mini {
   background: var(--ink-3);
   color: var(--text);
@@ -117,8 +115,43 @@ select { cursor: pointer; }
   padding: 10px; overflow: hidden auto;
   background: var(--ink-2);
 }
-.rail-left { grid-area: left; border-right: 1px solid var(--hair); }
 .rail-right { grid-area: right; border-left: 1px solid var(--hair); }
+
+/* ---------- 设置抽屉：数据源 + 开关 + 国家/风格/语言都收在这里 ---------- */
+/* 浮层而不是第三列：列表和面板因此各拿到原先那条 264px 的宽度 */
+
+.scrim {
+  position: fixed; inset: 0; z-index: 20;
+  background: rgba(0, 0, 0, .5);
+}
+
+.drawer {
+  position: fixed; z-index: 21;
+  left: 0; top: 0; bottom: 0;
+  width: min(376px, 94vw);
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 10px; overflow: hidden auto;
+  background: var(--ink-2);
+  border-right: 1px solid var(--hair);
+  box-shadow: 24px 0 48px rgba(0, 0, 0, .55);
+  animation: drawer-in .16s ease-out;
+}
+@keyframes drawer-in { from { transform: translateX(-14px); opacity: .35; } }
+
+.drawer-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 2px 2px 0;
+}
+.drawer-title {
+  margin: 0; font-size: 12px; font-weight: 700;
+  letter-spacing: .18em; text-transform: uppercase; color: var(--text);
+}
+.setbtn { flex: none; display: flex; align-items: center; gap: 6px; }
+.set-badge {
+  min-width: 17px; padding: 0 4px; border-radius: 9px;
+  background: var(--amber); color: var(--ink);
+  font: 700 10px/17px var(--mono); text-align: center;
+}
 
 .panel {
   border: 1px solid var(--hair); border-radius: 6px;
@@ -434,8 +467,8 @@ button.more { flex: none; width: 36px; padding: 8px 0; text-align: center; }
     /* minmax(0,1fr) 而不是 1fr：1fr 的下限是 min-content，
        搜索框和长统计行会把整列撑到 600px+，手机上就出现横向滚动条 */
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto auto auto;
-    grid-template-areas: "top" "deck" "stage" "foot" "right" "left";
+    grid-template-rows: auto auto auto auto auto;
+    grid-template-areas: "top" "deck" "stage" "foot" "right";
     height: auto;
     min-height: 100dvh;
   }
@@ -458,7 +491,18 @@ button.more { flex: none; width: 36px; padding: 8px 0; text-align: center; }
   }
   .brand-sub { display: none; }
   .topsearch { order: 3; flex-basis: 100%; }
-  .srcpick { order: 4; }
+  .setbtn { order: 4; margin-left: auto; min-height: 40px; padding: 0 14px; }
+  .setbtn kbd { display: none; }
+
+  /* 抽屉在手机上占满整屏：100% 是相对 fixed 元素的 ICB，会少了竖向滚动条那 15px，
+     右边留一条能点穿的缝，所以用 100vw 盖严 */
+  .drawer {
+    width: 100vw; left: 0; right: 0;
+    padding: 10px 12px calc(14px + env(safe-area-inset-bottom));
+    border-right: 0;
+  }
+  .drawer .drawer-head button { min-height: 40px; padding: 0 14px; }
+  .scrim { display: none; }
 
   /* iOS 上字号小于 16px 的输入框一聚焦就整页放大，且不会自己缩回去 */
   input[type="search"], input[type="text"], select, .mini { font-size: 16px; }

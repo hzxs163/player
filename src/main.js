@@ -35,6 +35,8 @@ const $ = (id) => document.getElementById(id);
 const els = {
   app: $('app'), dsDot: $('ds-dot'), dsText: $('ds-text'), dataset: $('dataset-info'),
   q: $('q'), sourceSelect: $('source-select'),
+  btnSettings: $('btn-settings'), settings: $('settings'), setScrim: $('set-scrim'),
+  setClose: $('set-close'), setBadge: $('set-badge'),
   poolCount: $('pool-count'), poolFill: $('pool-fill'), poolNote: $('pool-note'),
   secure: $('f-secure'), hls: $('f-hls'), geo: $('f-geo'),
   votes: $('f-votes'), oVotes: $('o-votes'), br: $('f-br'), oBr: $('o-br'),
@@ -295,12 +297,38 @@ function refreshFilter() {
     + (state.ccNote ? ' · ' + state.ccNote : '')
     + (state.indices.length === 0 ? ' · 条件太严，一台都不剩' : '');
   els.btnReset.disabled = !active.length;
+  // 条件收进抽屉后就看不见了，所以入口上挂个数字：0 就藏起来，别当成装饰
+  const n = active.length + (state.cond.secureOnly ? 1 : 0) + (state.cond.hideHls ? 1 : 0);
+  els.setBadge.hidden = n === 0;
+  els.setBadge.textContent = String(n);
   renderCcList();
   els.tagCount.textContent = String(state.cond.tags.size);
   els.langCount.textContent = state.cond.langs && state.cond.langs.size ? String(state.cond.langs.size) : '0';
   els.stageHint.textContent = `点行直接播放 · 列表是筛选命中的 ${fmt(state.indices.length)} 台，按快照顺序排`;
   if (list) list.setIndices(state.indices);
 }
+
+// ---------- 设置抽屉 ----------
+// 抽屉是覆盖层，不占栅格列：开合只改 hidden 和 aria-expanded，
+// 里面所有控件的绑定照旧，因为它们在 DOM 里从没被移动过位置以外的地方
+
+function openSettings() {
+  if (!els.settings.hidden) return;
+  els.settings.hidden = false;
+  els.setScrim.hidden = false;
+  els.btnSettings.setAttribute('aria-expanded', 'true');
+  els.setClose.focus();
+}
+
+function closeSettings() {
+  if (els.settings.hidden) return;
+  els.settings.hidden = true;
+  els.setScrim.hidden = true;
+  els.btnSettings.setAttribute('aria-expanded', 'false');
+  els.btnSettings.focus();
+}
+
+const settingsOpen = () => !els.settings.hidden;
 
 // 国家计数来自「忽略国家选择本身」的那一遍筛选，否则多选时数字会互相吃掉
 function ccCounts() {
@@ -828,6 +856,9 @@ function bind() {
   });
   els.tagFilter.addEventListener('input', debounce(() => renderTagChips(els.tagFilter.value), 140));
   els.btnReset.addEventListener('click', clearConditions);
+  els.btnSettings.addEventListener('click', () => (settingsOpen() ? closeSettings() : openSettings()));
+  els.setClose.addEventListener('click', closeSettings);
+  els.setScrim.addEventListener('click', closeSettings);
   els.btnMore.addEventListener('click', () => {
     const open = els.ctrlMore.hidden;
     els.ctrlMore.hidden = !open;
@@ -927,10 +958,12 @@ function bind() {
       if (e.key === 'Escape') e.target.blur();
       return;
     }
+    if (e.key === 'Escape' && settingsOpen()) { closeSettings(); return; }
     if (e.key === ' ') { e.preventDefault(); els.btnPlay.click(); }
     else if (e.key === 'n' || e.key === 'N') { els.btnRandom.click(); }
     else if (e.key === 'f' || e.key === 'F') { els.btnFav.click(); }
     else if (e.key === '/') { e.preventDefault(); els.q.focus(); }
+    else if (e.key === 's' || e.key === 'S') { if (settingsOpen()) closeSettings(); else openSettings(); }
   });
 
   // 音量/睡眠在窄屏收进 ⋯ 里、宽屏直接摊在走带条上：同一份 DOM，两种排法，
