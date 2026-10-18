@@ -1,0 +1,51 @@
+# 临时排障用：作业日志匿名 API 拿不到（403），所以在这条流水线里把 Gradle 的输出
+# 摘成 commit comment —— 提交信息带 ci-report 才会跑，正常发版不触发。
+# 定位到编译错误、修好之后这个文件就该删掉。
+name: ci-report
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+concurrency:
+  group: ci-report
+  cancel-in-progress: true
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    if: contains(github.event.head_commit.message, 'ci-report')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+      - name: 构建（输出留成文件，别只进日志）
+        continue-on-error: true
+        run: |
+          set +e
+          gradle -p android assembleRelease --no-daemon --console=plain \
+            -Pshibo.version=1.0.0 > build.log 2>&1
+          echo "gradle-exit=$?" >> build.log
+      - name: 把结果写成 commit comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## 安卓构建回执（run $GITHUB_RUN_ID）"
+            echo
+            echo '```'
+            grep -nE "error:|FAILURE|FAILED|What went wrong|^> Task |BUILD |gradle-exit|e: |Could not|not found" build.log | tail -n 45 || true
+            echo '```'
+            echo
+            echo '--- 日志尾部 ---'
+            echo '```'
+            tail -c 5200 build.log
+            echo '```'
+          } > report.md
+          gh api --method POST "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" \
+            -f body="$(cat report.md)" -q .html_url
