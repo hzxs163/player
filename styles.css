@@ -138,6 +138,13 @@ select { cursor: pointer; }
 }
 @keyframes drawer-in { from { transform: translateX(-14px); opacity: .35; } }
 
+/* 抽屉是要整列滚动的内容流，不能沿用常驻轨道那套「面板可压缩」：
+   轨道里 .panel.grow 收缩是为了塞满一屏，抽屉里收缩会把国家列表压成 60px（只剩两行）。
+   改成面板按内容排、列表给确定高度自己滚，超出部分交给抽屉的滚动条 */
+.drawer .panel, .drawer .panel.grow { flex: none; }
+.drawer .list { flex: none; min-height: 180px; max-height: 42vh; }
+.drawer .chips { flex: none; min-height: 84px; max-height: 26vh; }
+
 .drawer-head {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 2px 2px 0;
